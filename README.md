@@ -1,8 +1,8 @@
-# ms-users — Microservicio de Gestión de Usuarios
+# ms-products — Microservicio de Gestión de Productos
 
 ## PulpApp — Sistema Distribuido de Venta Online de Pulpas Naturales
 
-Microservicio responsable de la autenticación JWT, gestión de usuarios, pedidos internos y postulaciones laborales del sistema PulpApp.
+Microservicio responsable del catálogo de pulpas de fruta. Gestiona productos y categorías, expone una API REST consumida por el frontend y por `ms-orders` para validar precios al momento de crear pedidos.
 
 ---
 
@@ -12,12 +12,11 @@ Microservicio responsable de la autenticación JWT, gestión de usuarios, pedido
 |-----------|---------|
 | Java | 17 |
 | Spring Boot | 4.0.3 |
-| Spring Security | Incluido en Boot |
-| JJWT | 0.12.6 |
+| Spring Data JPA | Incluido en Boot |
+| Spring Validation | Incluido en Boot |
 | PostgreSQL | 15 |
 | Liquibase | Incluido en Boot |
-| Lombok | 1.18.38 |
-| MapStruct | 1.5.5.Final |
+| Lombok | Incluido en Boot |
 | Maven | 3.x |
 
 ---
@@ -25,8 +24,8 @@ Microservicio responsable de la autenticación JWT, gestión de usuarios, pedido
 ## Puerto
 
 ```
-8081 (local)
-8081:8081 (Docker)
+8082 (local)
+8082:8082 (Docker)
 ```
 
 ---
@@ -34,242 +33,218 @@ Microservicio responsable de la autenticación JWT, gestión de usuarios, pedido
 ## Estructura de paquetes
 
 ```
-com.pulpapp.ms_users/
+com.pulpapp.msproducts/
 ├── config/
-│   ├── SecurityConfig.java        ← Cadena de filtros JWT + reglas RBAC
-│   ├── CorsConfig.java            ← Habilitación de CORS global
-│   └── LiquibaseConfig.java       ← Configuración de migraciones
+│   ├── CorsConfig.java            ← Habilitación de CORS para todos los orígenes
+│   └── LiquibaseConfig.java       ← Configuración de migraciones de BD
 │
 ├── controller/
-│   ├── AuthController.java        ← POST /auth/login, POST /auth/register
-│   ├── UserController.java        ← CRUD /users
-│   ├── PedidoController.java      ← CRUD /pedidos
-│   └── JobApplicationController.java ← /job-applications
+│   └── ProductController.java     ← CRUD completo de productos en /products
 │
 ├── service/
-│   ├── AuthService.java           ← Lógica de login y registro con JWT
-│   ├── UserServiceImpl.java       ← CRUD usuarios + encriptación BCrypt
-│   ├── PedidoServiceImpl.java     ← Gestión de pedidos internos
-│   └── JobApplicationService.java ← Postulaciones + almacenamiento de CVs
-│
-├── security/
-│   ├── JwtService.java            ← Genera, firma y valida tokens JWT
-│   ├── JwtAuthFilter.java         ← OncePerRequestFilter — intercepta cada request
-│   ├── JwtAuthEntryPoint.java     ← Responde 401 en JSON (no HTML)
-│   ├── UserDetailsServiceImpl.java ← Carga usuario por email desde la DB
-│   └── UserPrincipal.java         ← Adapter User → UserDetails
+│   └── ProductService.java        ← Lógica de negocio: validación de nombre único,
+│                                     mapeo DTO ↔ entidad, operaciones CRUD
 │
 ├── entity/
-│   ├── User.java                  ← Entidad usuario con rol
-│   ├── Role.java                  ← Enum: ROLE_ADMIN, ROLE_SELLER
-│   ├── Pedido.java                ← Entidad pedido interno
-│   └── JobApplication.java        ← Entidad postulación laboral
+│   ├── Product.java               ← Entidad producto con relación a Category
+│   └── Category.java              ← Entidad categoría (1 categoría → N productos)
 │
 ├── dto/
-│   ├── AuthResponseDTO.java       ← {token, email, name, role}
-│   ├── LoginRequestDTO.java       ← {email, password}
-│   ├── RegisterRequestDTO.java    ← {cedula, telefono, name, email, password, direccion, role}
-│   ├── UserRequestDTO.java        ← Entrada para crear/actualizar usuario
-│   ├── UserResponseDTO.java       ← Salida de datos del usuario
-│   ├── PedidoDTO.java             ← Transferencia de pedidos
-│   ├── JobApplicationRequestDTO.java ← Entrada de postulación
-│   └── JobApplicationResponseDTO.java ← Salida de postulación
+│   ├── ProductRequestDTO.java     ← Entrada: nombre, descripción, precio, stock,
+│   │                                 disponibilidad, imageUrl (con validaciones)
+│   └── ProductResponseDTO.java    ← Salida: id + todos los campos del producto
 │
 ├── repository/
-│   ├── UserRepository.java        ← findByCedula, findByEmail, existsByCedula
-│   ├── PedidoRepository.java      ← JpaRepository básico
-│   └── JobApplicationRepository.java ← findAllByOrderByCreatedAtDesc
-│
-├── mapper/
-│   └── UserMapper.java            ← Conversión User ↔ DTOs
+│   ├── ProductRepository.java     ← JpaRepository + búsqueda por nombre único
+│   └── CategoryRepository.java    ← JpaRepository básico para categorías
 │
 ├── exception/
-│   ├── GlobalExceptionHandler.java ← Manejo centralizado de errores
-│   ├── BadCredentialsException.java ← 401 credenciales inválidas
-│   └── ResourceNotFoundException.java ← 404 recurso no encontrado
+│   ├── GlobalExceptionHandler.java ← Manejo centralizado de errores en JSON
+│   └── ResourceNotFoundException.java ← 404 producto no encontrado
 │
-└── core/
-    ├── BaseServiceImpl.java       ← Clase base genérica para CRUD
-    └── IBaseService.java          ← Interfaz base genérica
+└── MsProductsApplication.java     ← Clase principal Spring Boot
 ```
 
 ---
 
 ## Endpoints
 
-### Autenticación — Públicos
+### Productos
 
-| Método | Ruta | Descripción | Body |
-|--------|------|-------------|------|
-| POST | `/auth/register` | Registra usuario y retorna JWT | `RegisterRequestDTO` |
-| POST | `/auth/login` | Autentica y retorna JWT | `LoginRequestDTO` |
+| Método | Ruta | Código | Descripción |
+|--------|------|--------|-------------|
+| GET | `/products` | 200 | Listar todos los productos |
+| GET | `/products/{id}` | 200 | Obtener producto por ID |
+| POST | `/products` | 201 | Crear nuevo producto |
+| PUT | `/products/{id}` | 200 | Actualizar producto existente |
+| DELETE | `/products/{id}` | 204 | Eliminar producto |
 
-**Ejemplo registro:**
-```json
-POST /auth/register
+> **Nota de seguridad:** Las reglas de acceso son gestionadas por el API Gateway y `ms-users`. `GET /products` es público. `POST`, `PUT` y `DELETE` requieren `ROLE_ADMIN`.
+
+---
+
+### Ejemplos de uso
+
+**Listar todos los productos:**
+```
+GET http://localhost:8090/products
+```
+
+**Obtener producto por ID:**
+```
+GET http://localhost:8090/products/1
+```
+
+**Crear producto (requiere token ADMIN):**
+```
+POST http://localhost:8090/products
+Authorization: Bearer <token>
+Content-Type: application/json
+
 {
-  "cedula": "123456789",
-  "telefono": "3001234567",
-  "name": "Juan Pérez",
-  "email": "juan@pulpapp.com",
-  "password": "mipassword",
-  "direccion": "Calle 10 # 20-30",
-  "role": "ROLE_SELLER"
+  "name": "Pulpa de Mango",
+  "description": "Pulpa natural de mango sin conservantes",
+  "price": 8500.0,
+  "stock": 100,
+  "available": true,
+  "imageUrl": "img/mango.png"
 }
 ```
 
-**Respuesta:**
+**Respuesta `201 Created`:**
 ```json
 {
-  "token": "eyJhbGciOiJIUzI1NiJ9...",
-  "email": "juan@pulpapp.com",
-  "name": "Juan Pérez",
-  "role": "ROLE_SELLER"
+  "id": 1,
+  "name": "Pulpa de Mango",
+  "description": "Pulpa natural de mango sin conservantes",
+  "price": 8500.0,
+  "stock": 100,
+  "available": true,
+  "imageUrl": "img/mango.png"
 }
 ```
 
----
-
-### Usuarios
-
-| Método | Ruta | Acceso | Descripción |
-|--------|------|--------|-------------|
-| GET | `/users` | `ROLE_ADMIN` | Listar todos los usuarios |
-| GET | `/users/{id}` | Autenticado | Buscar por ID |
-| GET | `/users/cedula/{cedula}` | Público | Buscar por cédula |
-| GET | `/users/validar/{cedula}/{telefono}` | Público | Validar cédula + teléfono |
-| POST | `/users` | Público | Crear usuario |
-| PUT | `/users/{id}` | Público | Actualizar usuario |
-| DELETE | `/users/{id}` | `ROLE_ADMIN` | Eliminar usuario |
-
----
-
-### Pedidos internos
-
-| Método | Ruta | Acceso | Descripción |
-|--------|------|--------|-------------|
-| POST | `/pedidos` | Público | Crear pedido |
-| GET | `/pedidos` | Autenticado | Listar pedidos |
-| GET | `/pedidos/{id}` | Autenticado | Buscar pedido por ID |
-| DELETE | `/pedidos/{id}` | Autenticado | Eliminar pedido |
-
----
-
-### Postulaciones laborales
-
-| Método | Ruta | Acceso | Descripción |
-|--------|------|--------|-------------|
-| POST | `/job-applications` | Público | Enviar postulación con CV opcional |
-| GET | `/job-applications` | `ROLE_ADMIN` | Listar todas las postulaciones |
-| GET | `/job-applications/{id}/download` | `ROLE_ADMIN` | Descargar CV adjunto |
-
-**Ejemplo postulación (multipart/form-data):**
+**Actualizar producto (requiere token ADMIN):**
 ```
-fullName  = Juan Pérez
-email     = juan@ejemplo.com
-phone     = 3001234567
-position  = Operario de producción
-message   = Me interesa trabajar con ustedes
-file      = [archivo PDF]
+PUT http://localhost:8090/products/1
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "Pulpa de Mango Premium",
+  "description": "Pulpa natural de mango seleccionado",
+  "price": 9500.0,
+  "stock": 80,
+  "available": true,
+  "imageUrl": "img/mango1.png"
+}
+```
+
+**Eliminar producto (requiere token ADMIN):**
+```
+DELETE http://localhost:8090/products/1
+Authorization: Bearer <token>
 ```
 
 ---
 
 ## Modelo de datos
 
-### Tabla `users`
+### Tabla `category`
 
 | Columna | Tipo | Restricción |
 |---------|------|-------------|
 | id | BIGINT | PK, autoincrement |
-| cedula | VARCHAR(20) | NOT NULL, UNIQUE |
-| telefono | VARCHAR(20) | nullable |
-| name | VARCHAR(150) | NOT NULL |
-| email | VARCHAR(150) | NOT NULL, UNIQUE |
-| password | VARCHAR(255) | NOT NULL (BCrypt) |
-| direccion | VARCHAR(255) | NOT NULL |
-| role | VARCHAR(20) | NOT NULL, default `ROLE_SELLER` |
+| name | VARCHAR(100) | NOT NULL, UNIQUE |
+| description | VARCHAR(255) | nullable |
 
-### Tabla `pedidos`
+**Categorías iniciales (seed):**
 
-| Columna | Tipo | Restricción |
-|---------|------|-------------|
-| id | BIGINT | PK, autoincrement |
-| descripcion | VARCHAR(255) | NOT NULL |
-| total | DOUBLE PRECISION | NOT NULL |
-| user_id | BIGINT | FK → users (RESTRICT) |
-
-### Tabla `job_applications`
-
-| Columna | Tipo | Restricción |
-|---------|------|-------------|
-| id | BIGINT | PK, autoincrement |
-| full_name | VARCHAR(150) | NOT NULL |
-| email | VARCHAR(150) | NOT NULL |
-| phone | VARCHAR(50) | NOT NULL |
-| position | VARCHAR(150) | nullable |
-| message | TEXT | nullable |
-| cv_file | VARCHAR(255) | nullable (nombre UUID del archivo) |
-| created_at | TIMESTAMP | NOT NULL, default NOW() |
+| ID | Nombre | Descripción |
+|----|--------|-------------|
+| 1 | Tropicales | Pulpas de frutas tropicales como mango, maracuyá y lulo |
+| 2 | Cítricas | Pulpas de frutas cítricas como naranja y limón |
+| 3 | Berries | Pulpas de frutos rojos como fresa y mora |
+| 4 | Exóticas | Pulpas de frutas exóticas y poco comunes |
 
 ---
 
-## Seguridad JWT
+### Tabla `products`
 
-### Algoritmo y configuración
+| Columna | Tipo | Restricción |
+|---------|------|-------------|
+| id | BIGINT | PK, autoincrement |
+| name | VARCHAR(120) | NOT NULL, UNIQUE |
+| description | VARCHAR(255) | NOT NULL |
+| price | DOUBLE PRECISION | NOT NULL |
+| stock | INTEGER | NOT NULL |
+| available | BOOLEAN | NOT NULL |
+| image_url | VARCHAR(255) | nullable |
+| category_id | BIGINT | FK → category (SET NULL on delete), nullable |
 
-- **Algoritmo:** HMAC-SHA256
-- **Clave:** Base64 decodificada desde variable de entorno `JWT_SECRET`
-- **Expiración:** 24 horas (configurable con `JWT_EXPIRATION_MS`)
+> Hibernate convierte `imageUrl` → `image_url` automáticamente (snake_case).
 
-### Estructura del token
+---
 
-```json
-{
-  "role": "ROLE_ADMIN",
-  "sub": "admin@pulpapp.com",
-  "iat": 1234567890,
-  "exp": 1234654290
-}
-```
-
-### Flujo de autenticación
+### Relación entre entidades
 
 ```
-1. Cliente → POST /auth/login {email, password}
-2. AuthService → AuthenticationManager.authenticate()
-3. DaoAuthenticationProvider → UserDetailsServiceImpl.loadUserByUsername()
-4. BCrypt verifica la contraseña
-5. JwtService.generateToken() → firma el token con HMAC-SHA256
-6. Respuesta: {token, email, name, role}
-
-En cada request posterior:
-7. JwtAuthFilter extrae "Bearer <token>" del header Authorization
-8. JwtService.extractUsername() → obtiene el email del payload
-9. UserDetailsServiceImpl carga el usuario desde la DB
-10. JwtService.isTokenValid() → verifica firma y expiración
-11. SecurityContextHolder establece la autenticación con los roles
+Category (1) ──────────── (N) Product
+    id                         id
+    name                       name
+    description                description
+                               price
+                               stock
+                               available
+                               image_url
+                               category_id (FK)
 ```
 
-### Roles disponibles
+- Un producto puede pertenecer a una categoría (nullable)
+- Si se elimina una categoría, los productos quedan con `category_id = NULL` (SET NULL)
+- Un nombre de producto debe ser único (validado en servicio y a nivel de BD)
 
-| Rol | Descripción |
-|-----|-------------|
-| `ROLE_ADMIN` | Acceso completo — gestión de usuarios, productos, pedidos y postulaciones |
-| `ROLE_SELLER` | Acceso limitado — consulta de productos y pedidos propios |
+---
 
-### Tabla de permisos
+## DTOs
 
-| Endpoint | Público | ROLE_SELLER | ROLE_ADMIN |
-|----------|---------|-------------|------------|
-| POST /auth/** | ✅ | ✅ | ✅ |
-| GET /products | ✅ | ✅ | ✅ |
-| POST/PUT/DELETE /products | ❌ | ❌ | ✅ |
-| GET /orders | ❌ | ✅ | ✅ |
-| GET /users | ❌ | ❌ | ✅ |
-| DELETE /users | ❌ | ❌ | ✅ |
-| GET /job-applications | ❌ | ❌ | ✅ |
-| POST /job-applications | ✅ | ✅ | ✅ |
+### `ProductRequestDTO` — Entrada
+
+| Campo | Tipo | Validación |
+|-------|------|-----------|
+| name | String | `@NotBlank`, máx 120 caracteres |
+| description | String | `@NotBlank`, máx 255 caracteres |
+| price | Double | `@NotNull`, mayor que 0 |
+| stock | Integer | `@NotNull`, mayor o igual a 0 |
+| available | Boolean | `@NotNull` |
+| imageUrl | String | opcional, máx 255 caracteres |
+
+### `ProductResponseDTO` — Salida
+
+| Campo | Tipo |
+|-------|------|
+| id | Long |
+| name | String |
+| description | String |
+| price | Double |
+| stock | Integer |
+| available | Boolean |
+| imageUrl | String |
+
+---
+
+## Lógica de negocio
+
+### Validación de nombre único
+
+Antes de crear o actualizar un producto, el servicio verifica que no exista otro con el mismo nombre (ignorando mayúsculas/minúsculas):
+
+- **Crear:** `existsByNameIgnoreCase(name)` — si existe, retorna `409 Conflict`
+- **Actualizar:** `existsByNameIgnoreCaseAndIdNot(name, id)` — excluye el propio producto del chequeo
+
+### Mapeo DTO → Entidad
+
+El método `applyDtoToEntity` aplica `trim()` a los campos de texto para evitar espacios innecesarios antes de persistir.
 
 ---
 
@@ -277,84 +252,75 @@ En cada request posterior:
 
 | Changeset | Descripción |
 |-----------|-------------|
-| `1-create-users-table` | Tabla `users` con cédula y email únicos |
-| `2-create-pedidos-table` | Tabla `pedidos` con FK hacia `users` |
-| `3-add-fk-pedidos-to-users` | FK `pedidos.user_id → users.id` con RESTRICT |
-| `4-add-role-to-users` | Columna `role` en `users` con default `ROLE_SELLER` |
-| `5-create-job-applications-table` | Tabla `job_applications` para postulaciones |
+| `1-create-category-table` | Tabla `category` con nombre único |
+| `2-create-products-table` | Tabla `products` con todos sus campos base |
+| `3-add-category-fk-to-products` | Agrega `category_id` a `products` y crea FK con `SET NULL` |
+| `4-seed-categories` | Inserta las 4 categorías iniciales si la tabla está vacía |
 
 Todos los changesets usan `onFail: MARK_RAN` — son idempotentes y seguros para ejecutar múltiples veces.
 
 ---
 
-## Configuración (`application.yml`)
+## Manejo de errores
 
-```yaml
-server:
-  port: ${SERVER_PORT:8081}
+Todos los errores retornan JSON:
 
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/pulpapp_db}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:1234}
+```json
+{
+  "error": "Product not found with id: 99"
+}
+```
 
-  jpa:
-    hibernate:
-      ddl-auto: none        # Liquibase gestiona el esquema
-    show-sql: true
+| Excepción | Código HTTP | Descripción |
+|-----------|-------------|-------------|
+| `ResourceNotFoundException` | 404 | Producto no encontrado |
+| `ResponseStatusException` (CONFLICT) | 409 | Nombre de producto duplicado |
+| `MethodArgumentNotValidException` | 400 | Campos inválidos en el request |
+| `Exception` (fallback) | 500 | Error interno del servidor |
 
-  liquibase:
-    change-log: classpath:db/changelog/changelog-master.yml
+---
 
-  servlet:
-    multipart:
-      max-file-size: 5MB    # Límite para CVs adjuntos
-      max-request-size: 10MB
+## Configuración (`application.properties`)
 
-jwt:
-  secret: ${JWT_SECRET:...} # Clave Base64 para firmar tokens
-  expiration-ms: ${JWT_EXPIRATION_MS:86400000}  # 24 horas
+```properties
+spring.application.name=ms-products
+server.port=${SERVER_PORT:8082}
 
-app:
-  uploads-dir: ${UPLOADS_DIR:uploads/cv}  # Directorio de CVs
+spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/pulpapp_db}
+spring.datasource.username=${SPRING_DATASOURCE_USERNAME:postgres}
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:1234}
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+spring.jpa.hibernate.ddl-auto=none
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+
+spring.liquibase.change-log=classpath:db/changelog/changelog-master.yml
+spring.liquibase.enabled=true
 ```
 
 ### Variables de entorno (Docker)
 
 | Variable | Descripción | Default |
 |----------|-------------|---------|
-| `SERVER_PORT` | Puerto del servicio | `8081` |
+| `SERVER_PORT` | Puerto del servicio | `8082` |
 | `SPRING_DATASOURCE_URL` | URL de PostgreSQL | `jdbc:postgresql://localhost:5434/pulpapp_db` |
 | `SPRING_DATASOURCE_USERNAME` | Usuario DB | `postgres` |
 | `SPRING_DATASOURCE_PASSWORD` | Contraseña DB | `1234` |
-| `JWT_SECRET` | Clave secreta Base64 para JWT | valor por defecto incluido |
-| `JWT_EXPIRATION_MS` | Expiración del token en ms | `86400000` (24h) |
-| `UPLOADS_DIR` | Directorio de CVs en el contenedor | `uploads/cv` |
 
 ---
 
-## Manejo de errores
+## Dependencias (`pom.xml`)
 
-Todos los errores retornan JSON con el formato:
-
-```json
-{
-  "status": 401,
-  "error": "Unauthorized",
-  "message": "Token JWT ausente, inválido o expirado"
-}
-```
-
-| Excepción | Código HTTP |
-|-----------|-------------|
-| `BadCredentialsException` | 401 |
-| `AccessDeniedException` | 403 |
-| `ResourceNotFoundException` | 404 |
-| `RuntimeException` | 404 |
-| `MethodArgumentNotValidException` | 400 |
-| `IllegalArgumentException` | 400 |
-| `Exception` (fallback) | 500 |
+| Dependencia | Propósito |
+|-------------|-----------|
+| `spring-boot-starter-web` | API REST |
+| `spring-boot-starter-data-jpa` | Persistencia con Hibernate |
+| `spring-boot-starter-validation` | Validaciones con `@Valid` |
+| `postgresql` | Driver de base de datos |
+| `liquibase-core` | Versionado del esquema de BD |
+| `lombok` | Reducción de código boilerplate |
+| `spring-boot-starter-test` | Testing |
 
 ---
 
@@ -362,14 +328,20 @@ Todos los errores retornan JSON con el formato:
 
 ```bash
 # Con Docker Compose (recomendado)
-docker-compose up --build ms-users
-
-# Solo este servicio tras cambios
-docker-compose up --build ms-users
+docker-compose up --build ms-products
 
 # Ver logs
-docker-compose logs -f ms-users
+docker-compose logs -f ms-products
 ```
 
-El servicio queda disponible en `http://localhost:8081` y accesible desde el API Gateway en `http://localhost:8090`.
+El servicio queda disponible en `http://localhost:8082` y accesible desde el API Gateway en `http://localhost:8090/products`.
 
+---
+
+## Integración con otros microservicios
+
+| Microservicio | Tipo | Descripción |
+|---------------|------|-------------|
+| `api-gateway` | Consumidor | Enruta `/products/**` hacia este servicio |
+| `ms-orders` | Consumidor | Consulta `GET /products/{id}` para obtener el precio real al crear un pedido |
+| `ms-users` | Seguridad | Valida el token JWT y el rol antes de permitir escritura |
