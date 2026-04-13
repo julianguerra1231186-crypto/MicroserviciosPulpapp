@@ -450,21 +450,3 @@ docker-compose logs -f ms-users
 | pgAdmin | `http://localhost:5050` |
 
 ---
-
-## 7. Historias de usuario implementadas
-
-| ID | Historia | Estado |
-|----|----------|--------|
-| HU-SEC-001 | Registro de usuario con rol | ✅ |
-| HU-SEC-002 | Autenticación con JWT | ✅ |
-| HU-SEC-003 | Control de acceso a productos por rol | ✅ |
-| HU-SEC-004 | Gestión de pedidos para vendedores y administradores | ✅ |
-| HU-SEC-005 | Administración de usuarios restringida a ADMIN | ✅ |
-| HU-FE-001 | Navbar dinámico según estado de sesión | ✅ |
-| HU-FE-002 | Dashboard con tabs por rol | ✅ |
-| HU-FE-003 | Carrito con autocompletado de datos del usuario | ✅ |
-| HU-FE-004 | Slider hero con imágenes reales | ✅ |
-| HU-FE-005 | Página "Trabaja con nosotros" | ✅ |
-| HU-EMP-001 | Formulario de postulación con CV | ✅ |
-| HU-EMP-002 | Panel ADMIN para gestión de postulaciones | ✅ |
-| HU-EMP-003 | Descarga de hojas de vida con autenticación | ✅ |
